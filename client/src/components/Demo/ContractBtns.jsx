@@ -3,12 +3,48 @@ import { useCallback } from "react";
 import { useState } from "react";
 import useEth from "../../contexts/EthContext/useEth";
 
-function ContractBtns({ setValue }) {
+function replaceAt(array, index, value) {
+  const ret = array.slice(0);
+  ret[index] = value;
+  return ret;
+}
+
+const useEvent = (name, callback) => {
   const {
-    state: { contract, address, accounts },
+    state: { contract },
   } = useEth();
-  // const [inputValue, setInputValue] = useState("");
+
+  useEffect(() => {
+    let subscription;
+    if (contract) {
+      console.log({ contract });
+      subscription = contract.events[name]()
+        .on("connected", () => {
+          console.log("connected");
+        })
+        .on("data", (data) => {
+          console.log("event trigered", callback(data));
+        });
+    }
+
+    return () => {
+      if (subscription) {
+        subscription.unsubscribe();
+      }
+    };
+  }, [contract, callback, name]);
+};
+
+function ContractBtns() {
+  const {
+    state: { contract, accounts },
+  } = useEth();
+  const [votes, setVotes] = useState([]);
   const [candidates, setCandidates] = useState([]);
+
+  const incrementVote = useCallback((candidateId) => {
+    setVotes((votes) => replaceAt(votes, candidateId, votes[candidateId] + 1));
+  }, []);
 
   const getCandidates = useCallback(async () => {
     const count = await contract.methods.candidatesCount().call();
@@ -18,48 +54,48 @@ function ContractBtns({ setValue }) {
         .candidates(i)
         .call();
 
+      setVotes((votes) => replaceAt(votes, id, Number(voteCount)));
       candidates.push({ id, name, voteCount });
     }
     setCandidates(candidates);
   }, [contract.methods]);
 
-  // const handleInputChange = (e) => {
-  //   if (/^\d+$|^$/.test(e.target.value)) {
-  //     setInputValue(e.target.value);
-  //   }
-  // };
+  const handleVote = async (event) => {
+    try {
+      const candidateId = event.currentTarget.value;
+      await contract.methods.vote(candidateId).send({ from: accounts[0] });
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
-  // const read = async () => {
-  //   console.log({ contract });
-  //   const value = await contract.methods.read().call({ from: accounts[0] });
-  //   setValue(value);
-  // };
-
-  // const write = async (e) => {
-  //   if (e.target.tagName === "INPUT") {
-  //     return;
-  //   }
-  //   if (inputValue === "") {
-  //     alert("Please enter a value to write.");
-  //     return;
-  //   }
-  //   const newValue = parseInt(inputValue);
-  //   await contract.methods.write(newValue).send({ from: accounts[0] });
-  // };
+  useEvent("votedEvent", (data) => {
+    incrementVote(data.returnValues[0]);
+  });
 
   useEffect(() => {
     getCandidates();
   }, [getCandidates]);
 
   return (
-    <div className="btns">
+    <table>
+      <tr>
+        <th>Candidate name</th>
+        <th>Total votes</th>
+        <th></th>
+      </tr>
       {candidates.map((candidate, index) => (
-        <li key={index}>
-          <div>Candidate name: {candidate.name}</div>
-          {/* <div>Candidate votes: {candidate.votes}</div> */}
-        </li>
+        <tr key={index}>
+          <td> {candidate.name}</td>
+          <td> {votes[candidate.id]}</td>
+          <td>
+            <button onClick={handleVote} value={candidate.id}>
+              Vote
+            </button>
+          </td>
+        </tr>
       ))}
-    </div>
+    </table>
   );
 }
 
